@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-OPENCORTEX_VERSION="3.5.18"
+OPENCORTEX_VERSION="3.6.6"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Flags
@@ -83,6 +83,25 @@ ask_mrk() {
 
 WORKSPACE="${CLAWD_WORKSPACE:-$(pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLAGS_FILE="$WORKSPACE/.opencortex-flags"
+
+set_feature_flag() {
+  local key="$1"
+  local value="$2"
+
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "   [DRY RUN] Would set ${key}=${value} in $FLAGS_FILE"
+    return 0
+  fi
+
+  touch "$FLAGS_FILE"
+  if grep -q "^${key}=" "$FLAGS_FILE" 2>/dev/null; then
+    sed -i "s/^${key}=.*/${key}=${value}/" "$FLAGS_FILE"
+  else
+    echo "${key}=${value}" >> "$FLAGS_FILE"
+  fi
+  chmod 600 "$FLAGS_FILE" 2>/dev/null || true
+}
 
 echo "🔄 OpenCortex Update v${OPENCORTEX_VERSION}"
 echo "   Workspace: $WORKSPACE"
@@ -142,8 +161,11 @@ if command -v openclaw &>/dev/null; then
       echo "   [DRY RUN] Would update 'Daily Memory Distillation' (id: $DAILY_ID) message"
       UPDATED=$((UPDATED + 1))
     else
-      openclaw cron edit "$DAILY_ID" --message "$DAILY_MSG" --model "default" 2>/dev/null \
-        && echo "   ✅ Updated 'Daily Memory Distillation' cron (message + cleared model override)" \
+      _SAVED_MODEL=""
+      [ -f "$WORKSPACE/.opencortex-model" ] && _SAVED_MODEL=$(cat "$WORKSPACE/.opencortex-model" 2>/dev/null | tr -d '[:space:]')
+      _SAVED_MODEL="${_SAVED_MODEL:-sonnet}"
+      openclaw cron edit "$DAILY_ID" --message "$DAILY_MSG" --model "$_SAVED_MODEL" 2>/dev/null \
+        && echo "   ✅ Updated 'Daily Memory Distillation' cron (message + model: $_SAVED_MODEL)" \
         && UPDATED=$((UPDATED + 1)) \
         || echo "   ⚠️  Could not update 'Daily Memory Distillation' — run manually: openclaw cron edit $DAILY_ID --message '...'"
     fi
@@ -166,8 +188,11 @@ if command -v openclaw &>/dev/null; then
       echo "   [DRY RUN] Would update 'Weekly Synthesis' (id: $WEEKLY_ID) message"
       UPDATED=$((UPDATED + 1))
     else
-      openclaw cron edit "$WEEKLY_ID" --message "$WEEKLY_MSG" --model "default" 2>/dev/null \
-        && echo "   ✅ Updated 'Weekly Synthesis' cron (message + cleared model override)" \
+      _SAVED_MODEL=""
+      [ -f "$WORKSPACE/.opencortex-model" ] && _SAVED_MODEL=$(cat "$WORKSPACE/.opencortex-model" 2>/dev/null | tr -d '[:space:]')
+      _SAVED_MODEL="${_SAVED_MODEL:-sonnet}"
+      openclaw cron edit "$WEEKLY_ID" --message "$WEEKLY_MSG" --model "$_SAVED_MODEL" 2>/dev/null \
+        && echo "   ✅ Updated 'Weekly Synthesis' cron (message + model: $_SAVED_MODEL)" \
         && UPDATED=$((UPDATED + 1)) \
         || echo "   ⚠️  Could not update 'Weekly Synthesis' — run manually: openclaw cron edit $WEEKLY_ID --message '...'"
     fi
@@ -177,6 +202,42 @@ if command -v openclaw &>/dev/null; then
   fi
 else
   echo "   ⚠️  openclaw CLI not found — skipping cron updates"
+  SKIPPED=$((SKIPPED + 1))
+fi
+echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Part 1.5: Feature flags file for isolated cron runtime gates
+# ─────────────────────────────────────────────────────────────────────────────
+echo "🏷️  Ensuring feature flags are persisted..."
+
+# Voice profiling: infer enabled if VOICE.md exists
+if [ -f "$WORKSPACE/memory/VOICE.md" ]; then
+  set_feature_flag "VOICE_PROFILE" "1"
+  echo "   ✅ VOICE_PROFILE=1 (memory/VOICE.md exists)"
+  UPDATED=$((UPDATED + 1))
+else
+  set_feature_flag "VOICE_PROFILE" "0"
+  echo "   ⏭️  VOICE_PROFILE=0 (memory/VOICE.md not found)"
+  SKIPPED=$((SKIPPED + 1))
+fi
+
+# Infrastructure collection: preserve existing value if present, else infer from env, else default 0
+INFRA_CURRENT=""
+if [ -f "$FLAGS_FILE" ]; then
+  INFRA_CURRENT=$(grep -E '^INFRA_COLLECT=' "$FLAGS_FILE" 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || true)
+fi
+if [ -n "$INFRA_CURRENT" ]; then
+  set_feature_flag "INFRA_COLLECT" "$INFRA_CURRENT"
+  echo "   ⏭️  INFRA_COLLECT=$INFRA_CURRENT (kept existing value)"
+  SKIPPED=$((SKIPPED + 1))
+elif [ "${OPENCORTEX_INFRA_COLLECT:-}" = "1" ]; then
+  set_feature_flag "INFRA_COLLECT" "1"
+  echo "   ✅ INFRA_COLLECT=1 (from environment)"
+  UPDATED=$((UPDATED + 1))
+else
+  set_feature_flag "INFRA_COLLECT" "0"
+  echo "   ⏭️  INFRA_COLLECT=0 (default)"
   SKIPPED=$((SKIPPED + 1))
 fi
 echo ""
@@ -362,8 +423,15 @@ EOPR
                 insert_at=$((p0_line + 1))
               fi
               # Build the sub-principle
-              sub_principle="\n#### P0-${next_letter}: Custom from ${pnum}\n${custom_lines}\n"
-              sed -i "${insert_at}a\\${sub_principle}" "$WORKSPACE/MEMORY.md"
+              # Use temp file approach instead of sed to avoid special character issues
+              tmp_insert=$(mktemp)
+              head -n "$insert_at" "$WORKSPACE/MEMORY.md" > "$tmp_insert"
+              echo "" >> "$tmp_insert"
+              echo "#### P0-${next_letter}: Custom from ${pnum}" >> "$tmp_insert"
+              echo "$custom_lines" >> "$tmp_insert"
+              echo "" >> "$tmp_insert"
+              tail -n "+$((insert_at + 1))" "$WORKSPACE/MEMORY.md" >> "$tmp_insert"
+              mv "$tmp_insert" "$WORKSPACE/MEMORY.md"
               echo "   ✅ Migrated to P0-${next_letter}"
             else
               echo "   ⚠️  P0 section not found — custom content preserved in current ${pnum}"
@@ -531,8 +599,15 @@ if [ -f "$WORKSPACE/MEMORY.md" ]; then
                 # Build sub-principle from body (skip the original ### header)
                 sub_body=$(echo "$extra_body" | tail -n +2)
                 sub_name=$(echo "$extra_title" | sed 's/^### P[0-9]*: //')
-                sub_text="\n#### P0-${next_letter}: ${sub_name}\n${sub_body}\n"
-                sed -i "${insert_at}a\\${sub_text}" "$WORKSPACE/MEMORY.md"
+                # Use temp file approach to avoid special character issues with sed
+                tmp_insert=$(mktemp)
+                head -n "$insert_at" "$WORKSPACE/MEMORY.md" > "$tmp_insert"
+                echo "" >> "$tmp_insert"
+                echo "#### P0-${next_letter}: ${sub_name}" >> "$tmp_insert"
+                echo "$sub_body" >> "$tmp_insert"
+                echo "" >> "$tmp_insert"
+                tail -n "+$((insert_at + 1))" "$WORKSPACE/MEMORY.md" >> "$tmp_insert"
+                mv "$tmp_insert" "$WORKSPACE/MEMORY.md"
 
                 # Remove the original
                 start_line=$(grep -n "^### ${extra_pnum}:" "$WORKSPACE/MEMORY.md" | tail -1 | cut -d: -f1)
@@ -1384,12 +1459,16 @@ if command -v openclaw >/dev/null 2>&1; then
       fi
       CRON_TZ="${CRON_TZ:-UTC}"
       if [ "$DRY_RUN" != "true" ]; then
+        USER_MODEL=""
+        [ -f "$WORKSPACE/.opencortex-model" ] && USER_MODEL=$(cat "$WORKSPACE/.opencortex-model" 2>/dev/null | tr -d '[:space:]')
+        USER_MODEL="${USER_MODEL:-sonnet}"
         openclaw cron add \
           --name "Daily Memory Distillation" \
           --cron "0 3 * * *" \
           --tz "$CRON_TZ" \
           --session "isolated" \
-          --timeout-seconds 180 \
+          --timeout-seconds 600 \
+          --model "$USER_MODEL" \
           --no-deliver \
           --message "$DAILY_MSG" 2>/dev/null && \
         echo "   ✅ Created Daily Memory Distillation cron (3 AM $CRON_TZ)" || \
@@ -1406,12 +1485,16 @@ if command -v openclaw >/dev/null 2>&1; then
     if ask_yn "   Create it now? (Y/n): " y; then
       CRON_TZ="${CRON_TZ:-${CLAWD_TZ:-UTC}}"
       if [ "$DRY_RUN" != "true" ]; then
+        USER_MODEL=""
+        [ -f "$WORKSPACE/.opencortex-model" ] && USER_MODEL=$(cat "$WORKSPACE/.opencortex-model" 2>/dev/null | tr -d '[:space:]')
+        USER_MODEL="${USER_MODEL:-sonnet}"
         openclaw cron add \
           --name "Weekly Synthesis" \
           --cron "0 5 * * 0" \
           --tz "$CRON_TZ" \
           --session "isolated" \
-          --timeout-seconds 180 \
+          --timeout-seconds 600 \
+          --model "$USER_MODEL" \
           --no-deliver \
           --message "$WEEKLY_MSG" 2>/dev/null && \
         echo "   ✅ Created Weekly Synthesis cron (Sunday 5 AM $CRON_TZ)" || \

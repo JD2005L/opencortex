@@ -3,11 +3,30 @@
 # Safe to re-run: won't overwrite existing files.
 set -euo pipefail
 
-OPENCORTEX_VERSION="3.5.18"
+OPENCORTEX_VERSION="3.6.6"
 
 # --- Version check: detect existing install and offer update ---
 WORKSPACE="${CLAWD_WORKSPACE:-$(pwd)}"
 VERSION_FILE="$WORKSPACE/.opencortex-version"
+FLAGS_FILE="$WORKSPACE/.opencortex-flags"
+
+set_feature_flag() {
+  local key="$1"
+  local value="$2"
+
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "   [DRY RUN] Would set feature flag: ${key}=${value} in $FLAGS_FILE"
+    return 0
+  fi
+
+  touch "$FLAGS_FILE"
+  if grep -q "^${key}=" "$FLAGS_FILE" 2>/dev/null; then
+    sed -i "s/^${key}=.*/${key}=${value}/" "$FLAGS_FILE"
+  else
+    echo "${key}=${value}" >> "$FLAGS_FILE"
+  fi
+  chmod 600 "$FLAGS_FILE" 2>/dev/null || true
+}
 
 # Detect existing install: version file OR core files present
 INSTALLED_VERSION=""
@@ -169,9 +188,30 @@ if [ "$TZ" = "UTC" ] || [ "$TZ" = "Etc/UTC" ]; then
   fi
 fi
 
+# --- Model selection ---
+MODEL_FILE="$WORKSPACE/.opencortex-model"
+USER_MODEL=""
+if [ -f "$MODEL_FILE" ]; then
+  USER_MODEL=$(cat "$MODEL_FILE" 2>/dev/null | tr -d '[:space:]')
+fi
+if [ -z "$USER_MODEL" ]; then
+  echo "🤖 Preferred AI model for cron jobs:"
+  echo "   This is the model used for nightly distillation and weekly synthesis."
+  echo "   Examples: sonnet, opus, haiku, anthropic/claude-sonnet-4-5, gpt-4o"
+  read -p "   Enter model name (or press Enter for 'sonnet'): " USER_MODEL_INPUT
+  USER_MODEL_INPUT=$(echo "$USER_MODEL_INPUT" | tr -d '[:space:]')
+  USER_MODEL="${USER_MODEL_INPUT:-sonnet}"
+  if [ "$DRY_RUN" != "true" ]; then
+    echo "$USER_MODEL" > "$MODEL_FILE"
+    echo "   ✅ Saved to .opencortex-model"
+  fi
+  echo ""
+fi
+
 echo "🧠 OpenCortex — Installing self-improving memory architecture"
 echo "   Workspace: $WORKSPACE"
 echo "   Timezone:  $TZ"
+echo "   Model:     $USER_MODEL"
 echo ""
 
 # --- Feature Selection ---
@@ -203,6 +243,19 @@ if ask_yn "📊 Enable daily metrics tracking? Tracks knowledge growth over time
   ENABLE_METRICS="y"
 else
   ENABLE_METRICS="n"
+fi
+
+# Persist feature flags so isolated cron runs can reliably detect opt-in settings
+if [ "$ENABLE_VOICE" = "y" ]; then
+  set_feature_flag "VOICE_PROFILE" "1"
+else
+  set_feature_flag "VOICE_PROFILE" "0"
+fi
+
+if [ "$ENABLE_INFRA" = "y" ]; then
+  set_feature_flag "INFRA_COLLECT" "1"
+else
+  set_feature_flag "INFRA_COLLECT" "0"
 fi
 
 echo ""
@@ -403,6 +456,7 @@ if [ ! -f "$WORKSPACE/MEMORY.md" ]; then
   if [ "$DRY_RUN" != "true" ]; then
     cat > "$WORKSPACE/MEMORY.md" << 'MEMEOF'
 # MEMORY.md — Core Memory
+<!-- Keep this file under 5KB. Move accumulated lessons to memory/lessons.md -->
 
 ## 🔴 PRINCIPLES (always loaded, always followed)
 
@@ -424,28 +478,24 @@ Write before responding: when a user states a preference, makes a decision, give
 Emails, public posts, destructive ops — get confirmation first.
 
 ### P4: Tool Shed & Workflows
-All tools, APIs, access methods, and capabilities SHALL be documented in TOOLS.md with goal-oriented abilities descriptions. When given a new tool during work, immediately add it. Document workflows and pipelines in memory/workflows/ with clear descriptions of what they do, how they connect, and how to operate them.
-**Creation:** When you access a new system, API, or resource more than once — or when given access to something that will clearly recur — proactively create the tool entry, bridge doc, or helper script. When a multi-service workflow is described or used, document it in memory/workflows/. Do not wait to be asked.
-**Enforcement:** After using any CLI tool, API, or service — before ending the task — verify it exists in TOOLS.md. If not, add it immediately. Do not defer to distillation.
+All tools, APIs, access methods, and capabilities SHALL be documented in TOOLS.md with goal-oriented abilities descriptions. When given a new tool during work, immediately add it. Document workflows and pipelines in memory/workflows/.
+**Enforcement:** After using any CLI tool, API, or service — before ending the task — verify it exists in TOOLS.md. If not, add it immediately.
 
 ### P5: Capture Decisions & Preferences
 When the user makes a decision or states a preference, immediately record it. Decisions go in the relevant project/memory file. Preferences go in memory/preferences.md under the right category. Never re-ask something already decided or stated.
-**Decisions format:** **Decision:** [what] — [why] (date) — in the relevant project or memory file.
-**Preferences format:** **Preference:** [what] — [context/reasoning] (date) — in memory/preferences.md under the matching category (Communication, Code & Technical, Workflow & Process, Scheduling & Time, Tools & Services, Content & Media, Environment & Setup).
-**Recognition:** Decisions include: explicit choices, architectural directions, and workflow rules. Preferences include: stated likes/dislikes, communication style preferences, tool preferences, formatting preferences, and any opinion that would affect future work. If the user says "I prefer X" or "always do Y" or "I don'"'"'t like Z" — that is a preference. Capture it immediately.
-**Enforcement:** Before ending any conversation with substantive work, scan for uncaptured decisions AND preferences. If any, write them before closing.
+**Format:** **Decision:** [what] — [why] (date). **Preference:** [what] — [context] (date).
+**Enforcement:** Before ending any conversation with substantive work, scan for uncaptured decisions and preferences. Write them before closing.
 
 ### P6: Sub-agent Debrief
 Sub-agents MUST write a brief debrief to memory/YYYY-MM-DD.md before completing. Include: what was done, what was learned, any issues.
-**Recovery:** If a sub-agent fails, times out, or is killed before debriefing, the parent agent writes the debrief on its behalf noting the failure mode. No delegated work should vanish from memory.
+**Recovery:** If a sub-agent fails or is killed before debriefing, the parent agent writes the debrief noting the failure mode.
 
 ### P7: Log Failures
-When something fails or the user corrects you, immediately append to the daily log with ❌ FAILURE: or 🔧 CORRECTION: tags. Include: what happened, why it failed, what fixed it. Nightly distillation routes these to the right file.
-**Root cause:** Do not just log what happened — log *why* it happened and what would prevent it next time. If it is a systemic issue (missing principle, bad assumption, tool gap), propose a fix immediately.
+When something fails or the user corrects you, immediately append to the daily log with ❌ FAILURE: or 🔧 CORRECTION: tags. Include: what happened, why it failed, what fixed it.
+**Root cause:** Log *why* it happened and what would prevent it next time. Propose a fix if systemic.
 
 ### P8: Check the Shed First
-Before telling the user you cannot do something, or asking them to do it manually, CHECK your resources: TOOLS.md, INFRA.md, memory/projects/, runbooks, and any bridge docs. If a tool, API, credential, or access method exists that could accomplish the task — use it. The shed exists so you do not make the user do work you are equipped to handle.
-**Enforcement:** Nightly audit scans for instances where the agent deferred work to the user that could have been done via documented tools.
+Before telling the user you cannot do something, CHECK your resources: TOOLS.md, INFRA.md, memory/projects/, runbooks. If a tool or access method exists that could accomplish the task — use it.
 
 ---
 
@@ -480,6 +530,9 @@ Cross-cutting user preferences organized by category. Updated as discovered.
 ### Runbooks (memory/runbooks/)
 (add repeatable procedures here)
 
+### Key Lessons
+See memory/lessons.md for accumulated technical lessons.
+
 ### Daily Logs
 memory/archive/YYYY-MM-DD.md — Archived daily logs
 memory/YYYY-MM-DD.md — Current daily log (distilled nightly)
@@ -493,6 +546,7 @@ elif ! grep -q "PRINCIPLES" "$WORKSPACE/MEMORY.md" 2>/dev/null; then
     PRINCIPLES_BLOCK=$(cat << 'PREOF'
 
 ## 🔴 PRINCIPLES (always loaded, always followed)
+<!-- Keep MEMORY.md under 5KB. Move accumulated lessons to memory/lessons.md -->
 
 ### P0: Custom Principles
 Your custom principles go here as P0-A, P0-B, P0-C, etc. All custom principles belong in P0 regardless of how they are requested. These are never modified by OpenCortex updates.
@@ -512,28 +566,24 @@ Write before responding: when a user states a preference, makes a decision, give
 Emails, public posts, destructive ops — get confirmation first.
 
 ### P4: Tool Shed & Workflows
-All tools, APIs, access methods, and capabilities SHALL be documented in TOOLS.md with goal-oriented abilities descriptions. When given a new tool during work, immediately add it. Document workflows and pipelines in memory/workflows/ with clear descriptions of what they do, how they connect, and how to operate them.
-**Creation:** When you access a new system, API, or resource more than once — or when given access to something that will clearly recur — proactively create the tool entry, bridge doc, or helper script. When a multi-service workflow is described or used, document it in memory/workflows/. Do not wait to be asked.
-**Enforcement:** After using any CLI tool, API, or service — before ending the task — verify it exists in TOOLS.md. If not, add it immediately. Do not defer to distillation.
+All tools, APIs, access methods, and capabilities SHALL be documented in TOOLS.md with goal-oriented abilities descriptions. When given a new tool during work, immediately add it. Document workflows and pipelines in memory/workflows/.
+**Enforcement:** After using any CLI tool, API, or service — before ending the task — verify it exists in TOOLS.md. If not, add it immediately.
 
 ### P5: Capture Decisions & Preferences
 When the user makes a decision or states a preference, immediately record it. Decisions go in the relevant project/memory file. Preferences go in memory/preferences.md under the right category. Never re-ask something already decided or stated.
-**Decisions format:** **Decision:** [what] — [why] (date) — in the relevant project or memory file.
-**Preferences format:** **Preference:** [what] — [context/reasoning] (date) — in memory/preferences.md under the matching category (Communication, Code & Technical, Workflow & Process, Scheduling & Time, Tools & Services, Content & Media, Environment & Setup).
-**Recognition:** Decisions include: explicit choices, architectural directions, and workflow rules. Preferences include: stated likes/dislikes, communication style preferences, tool preferences, formatting preferences, and any opinion that would affect future work. Preferences also include phrases like 'I prefer', 'always do', 'I want', or similar signals. Capture them immediately.
-**Enforcement:** Before ending any conversation with substantive work, scan for uncaptured decisions AND preferences. If any, write them before closing.
+**Format:** **Decision:** [what] — [why] (date). **Preference:** [what] — [context] (date).
+**Enforcement:** Before ending any conversation with substantive work, scan for uncaptured decisions and preferences. Write them before closing.
 
 ### P6: Sub-agent Debrief
 Sub-agents MUST write a brief debrief to memory/YYYY-MM-DD.md before completing. Include: what was done, what was learned, any issues.
-**Recovery:** If a sub-agent fails, times out, or is killed before debriefing, the parent agent writes the debrief on its behalf noting the failure mode. No delegated work should vanish from memory.
+**Recovery:** If a sub-agent fails or is killed before debriefing, the parent agent writes the debrief noting the failure mode.
 
 ### P7: Log Failures
-When something fails or the user corrects you, immediately append to the daily log with ❌ FAILURE: or 🔧 CORRECTION: tags. Include: what happened, why it failed, what fixed it. Nightly distillation routes these to the right file.
-**Root cause:** Do not just log what happened — log *why* it happened and what would prevent it next time. If it is a systemic issue (missing principle, bad assumption, tool gap), propose a fix immediately.
+When something fails or the user corrects you, immediately append to the daily log with ❌ FAILURE: or 🔧 CORRECTION: tags. Include: what happened, why it failed, what fixed it.
+**Root cause:** Log *why* it happened and what would prevent it next time. Propose a fix if systemic.
 
 ### P8: Check the Shed First
-Before telling the user you cannot do something, or asking them to do it manually, CHECK your resources: TOOLS.md, INFRA.md, memory/projects/, runbooks, and any bridge docs. If a tool, API, credential, or access method exists that could accomplish the task — use it. The shed exists so you do not make the user do work you are equipped to handle.
-**Enforcement:** Nightly audit scans for instances where the agent deferred work to the user that could have been done via documented tools.
+Before telling the user you cannot do something, CHECK your resources: TOOLS.md, INFRA.md, memory/projects/, runbooks. If a tool or access method exists that could accomplish the task — use it.
 
 PREOF
 )
@@ -645,6 +695,15 @@ Discovered preferences, organized by category. Updated by nightly distillation w
 ## Environment & Setup
 (add as discovered)'
 
+create_if_missing "$WORKSPACE/memory/lessons.md" '# Lessons Learned
+
+Accumulated technical lessons from all projects. Referenced from MEMORY.md.
+Add new lessons here, not in MEMORY.md (to keep MEMORY.md under 5KB).
+
+---
+
+*(Lessons added here as they are discovered — by distillation or manually)*'
+
 if [ "$ENABLE_VOICE" = "y" ]; then
   create_if_missing "$WORKSPACE/memory/VOICE.md" '# VOICE.md — How My Human Communicates
 
@@ -716,7 +775,8 @@ if command -v openclaw &>/dev/null; then
         --cron "0 3 * * *" \
         --tz "$TZ" \
         --session "isolated" \
-        --timeout-seconds 180 \
+        --timeout-seconds 600 \
+        --model "$USER_MODEL" \
         --no-deliver \
         --message "$CRON_MSG" 2>/dev/null && \
         echo "   ✅ Daily Memory Distillation cron created" && \
@@ -743,7 +803,8 @@ if command -v openclaw &>/dev/null; then
         --cron "0 5 * * 0" \
         --tz "$TZ" \
         --session "isolated" \
-        --timeout-seconds 180 \
+        --timeout-seconds 600 \
+        --model "$USER_MODEL" \
         --no-deliver \
         --message "Weekly synthesis. Read skills/opencortex/references/weekly-synthesis.md for full instructions and follow them. Workspace: $WORKSPACE" 2>/dev/null && \
         echo "   ✅ Weekly Synthesis cron created" && \
@@ -888,24 +949,24 @@ echo "🔑 Opt-in feature environment variables:"
 echo ""
 if [ "$ENABLE_VOICE" = "y" ]; then
   echo "   Voice profiling is enabled in the cron (you said yes)."
-  echo "   To activate it at runtime, set this in your OpenClaw environment:"
-  echo "     export OPENCORTEX_VOICE_PROFILE=1"
-  echo "   Without this variable, the nightly distillation will skip voice profiling."
+  echo "   Runtime detection uses .opencortex-flags (VOICE_PROFILE=1) by default."
+  echo "   Optional override: export OPENCORTEX_VOICE_PROFILE=1"
   echo ""
 else
   echo "   Voice profiling: OFF (not requested)"
-  echo "   To enable later: set OPENCORTEX_VOICE_PROFILE=1 in your OpenClaw environment."
+  echo "   To enable later: set VOICE_PROFILE=1 in .opencortex-flags"
+  echo "   Optional override: export OPENCORTEX_VOICE_PROFILE=1"
   echo ""
 fi
 if [ "$ENABLE_INFRA" = "y" ]; then
   echo "   Infrastructure auto-collection is enabled in the cron (you said yes)."
-  echo "   To activate it at runtime, set this in your OpenClaw environment:"
-  echo "     export OPENCORTEX_INFRA_COLLECT=1"
-  echo "   Without this variable, the nightly distillation will skip writing to INFRA.md."
+  echo "   Runtime detection uses .opencortex-flags (INFRA_COLLECT=1) by default."
+  echo "   Optional override: export OPENCORTEX_INFRA_COLLECT=1"
   echo ""
 else
   echo "   Infrastructure auto-collection: OFF (not requested)"
-  echo "   To enable later: set OPENCORTEX_INFRA_COLLECT=1 in your OpenClaw environment."
+  echo "   To enable later: set INFRA_COLLECT=1 in .opencortex-flags"
+  echo "   Optional override: export OPENCORTEX_INFRA_COLLECT=1"
   echo ""
 fi
 echo "   All other optional features (git push, scrub-all, file passphrase):"

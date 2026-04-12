@@ -161,8 +161,8 @@ OpenCortex contains **zero network operations** — no telemetry, no phone-home,
 | Weekly synthesis cron | ✅ ON | — | Reads `memory/archive/`, writes summaries + runbooks | `openclaw cron delete <id>` |
 | Principle enforcement audits | ✅ ON | — | Part of distillation — audits within workspace | Remove audit sections from cron message |
 | Encrypted vault | Asked at install | Choose "direct" mode to skip | `.vault/` directory, system keyring | Don't init vault; delete `.vault/` |
-| Voice profiling | ❌ OFF | `OPENCORTEX_VOICE_PROFILE=1` | Reads workspace conversation logs → `memory/VOICE.md` | Unset env var; delete `memory/VOICE.md` |
-| Infrastructure collection | ❌ OFF | `OPENCORTEX_INFRA_COLLECT=1` | Routes infra mentions from daily logs → `INFRA.md` | Unset env var |
+| Voice profiling | ❌ OFF | `OPENCORTEX_VOICE_PROFILE=1` **or** `.opencortex-flags` (`VOICE_PROFILE=1`) | Reads workspace conversation logs → `memory/VOICE.md` | Set flag/env to `0`; delete `memory/VOICE.md` |
+| Infrastructure collection | ❌ OFF | `OPENCORTEX_INFRA_COLLECT=1` **or** `.opencortex-flags` (`INFRA_COLLECT=1`) | Routes infra mentions from daily logs → `INFRA.md` | Set flag/env to `0` |
 | Git backup | ❌ OFF | Say "yes" at install | Commits workspace to git (local only by default) | Remove from crontab; delete scripts |
 | Git push to remote | ❌ OFF | `--push` flag on each run | Pushes scrubbed commits to remote | Don't pass `--push` |
 | Daily metrics tracking | ❌ OFF | Say "yes" at install | Read-only file counts → `memory/metrics.log` | Remove from crontab; delete `metrics.log` |
@@ -245,8 +245,10 @@ Optional environment variables (all off by default):
 | `CLAWD_WORKSPACE` | Override workspace directory (defaults to cwd) | No |
 | `CLAWD_TZ` | Timezone for cron scheduling (defaults to UTC) | No |
 | `OPENCORTEX_VAULT_PASS` | Vault passphrase via env var (prefer keyring) | Yes |
-| `OPENCORTEX_VOICE_PROFILE` | Enable voice profiling in distillation | No |
-| `OPENCORTEX_INFRA_COLLECT` | Enable infrastructure auto-collection | No |
+| `OPENCORTEX_VOICE_PROFILE` | Enable voice profiling in distillation (override) | No |
+| `OPENCORTEX_INFRA_COLLECT` | Enable infrastructure auto-collection (override) | No |
+
+Runtime note: isolated cron jobs persist opt-in switches in `.opencortex-flags` so they work even when shell env vars are not injected into cron sessions.
 | `OPENCORTEX_SCRUB_ALL` | Scrub all tracked files during git backup | No |
 | `OPENCORTEX_ALLOW_FILE_PASSPHRASE` | Allow file-based vault passphrase | No |
 

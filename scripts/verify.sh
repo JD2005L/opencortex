@@ -54,8 +54,19 @@ echo ""
 
 # --- Voice profile ---
 echo "🎙️ Voice profile:"
+FLAGS_FILE="$WORKSPACE/.opencortex-flags"
+VOICE_FLAG=""
+if [ -f "$FLAGS_FILE" ]; then
+  VOICE_FLAG=$(grep -E '^VOICE_PROFILE=' "$FLAGS_FILE" 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || true)
+fi
+VOICE_ENV="${OPENCORTEX_VOICE_PROFILE:-}"
 if [ -f "$WORKSPACE/memory/VOICE.md" ]; then
   check "VOICE.md exists (voice profiling enabled)" "ok"
+  if [ "$VOICE_FLAG" = "1" ] || [ "$VOICE_ENV" = "1" ]; then
+    check "Voice profiling runtime gate is enabled (flag/env)" "ok"
+  else
+    check "VOICE.md exists but runtime voice gate is OFF (set VOICE_PROFILE=1 in .opencortex-flags or OPENCORTEX_VOICE_PROFILE=1)" "warn"
+  fi
 else
   check "VOICE.md not found (voice profiling not enabled — this is fine if you skipped it)" "warn"
 fi
@@ -78,11 +89,90 @@ if command -v openclaw &>/dev/null; then
   # Check for problematic model overrides (models that don't exist)
   CRON_JSON=$(openclaw cron list --json 2>/dev/null || echo "")
   if [ -n "$CRON_JSON" ]; then
+    # Check distillation/weekly prompts are not empty
+    if command -v python3 &>/dev/null; then
+      DISTILL_MSG=$(echo "$CRON_JSON" | python3 -c "
+import sys, json
+try:
+  data = json.load(sys.stdin)
+  if isinstance(data, list):
+    for c in data:
+      n = (c.get('name') or '').lower()
+      if 'distill' in n:
+        print((c.get('message') or '').strip())
+        break
+except: pass
+" 2>/dev/null || echo "")
+      WEEKLY_MSG=$(echo "$CRON_JSON" | python3 -c "
+import sys, json
+try:
+  data = json.load(sys.stdin)
+  if isinstance(data, list):
+    for c in data:
+      n = (c.get('name') or '').lower()
+      if 'synth' in n:
+        print((c.get('message') or '').strip())
+        break
+except: pass
+" 2>/dev/null || echo "")
+      if [ -n "$DISTILL_MSG" ]; then
+        check "Distillation cron prompt is set" "ok"
+      else
+        check "Distillation cron prompt is empty (distillation will no-op)" "warn"
+      fi
+      if [ -n "$WEEKLY_MSG" ]; then
+        check "Weekly synthesis cron prompt is set" "ok"
+      else
+        check "Weekly synthesis cron prompt is empty (synthesis will no-op)" "warn"
+      fi
+    fi
+
     BAD_MODELS=$(echo "$CRON_JSON" | grep -o '"model":\s*"[^"]*"' | grep -iE '"(anthropic/default|default)"' || true)
     if [ -n "$BAD_MODELS" ]; then
       check "Cron jobs have invalid model overrides (e.g. 'default' is not a real model)" "warn"
     else
       check "No invalid model overrides in crons" "ok"
+    fi
+    # Check cron timeouts are sufficient
+    if command -v python3 &>/dev/null; then
+      DISTILL_TIMEOUT=$(echo "$CRON_JSON" | python3 -c "
+import sys, json
+try:
+  data = json.load(sys.stdin)
+  if isinstance(data, list):
+    for c in data:
+      name = c.get('name','')
+      if 'distill' in name.lower():
+        print(c.get('timeoutSeconds', c.get('timeout_seconds', c.get('timeout', 0))))
+        break
+except: pass
+" 2>/dev/null || echo "")
+      SYNTH_TIMEOUT=$(echo "$CRON_JSON" | python3 -c "
+import sys, json
+try:
+  data = json.load(sys.stdin)
+  if isinstance(data, list):
+    for c in data:
+      name = c.get('name','')
+      if 'synth' in name.lower():
+        print(c.get('timeoutSeconds', c.get('timeout_seconds', c.get('timeout', 0))))
+        break
+except: pass
+" 2>/dev/null || echo "")
+      if [ -n "$DISTILL_TIMEOUT" ] && [ "$DISTILL_TIMEOUT" -gt 0 ] 2>/dev/null; then
+        if [ "$DISTILL_TIMEOUT" -lt 300 ]; then
+          check "Distillation cron timeout is ${DISTILL_TIMEOUT}s — recommended minimum is 300s (set to 600s for best results)" "warn"
+        else
+          check "Distillation cron timeout: ${DISTILL_TIMEOUT}s (ok)" "ok"
+        fi
+      fi
+      if [ -n "$SYNTH_TIMEOUT" ] && [ "$SYNTH_TIMEOUT" -gt 0 ] 2>/dev/null; then
+        if [ "$SYNTH_TIMEOUT" -lt 300 ]; then
+          check "Weekly synthesis cron timeout is ${SYNTH_TIMEOUT}s — recommended minimum is 300s for distillation, 600s for synthesis" "warn"
+        else
+          check "Weekly synthesis cron timeout: ${SYNTH_TIMEOUT}s (ok)" "ok"
+        fi
+      fi
     fi
   fi
 else
@@ -106,12 +196,17 @@ if [ -f "$WORKSPACE/MEMORY.md" ]; then
   # Context budget: check MEMORY.md size
   MEM_SIZE=$(wc -c < "$WORKSPACE/MEMORY.md" 2>/dev/null | tr -d ' ')
   MEM_KB=$(( MEM_SIZE / 1024 ))
-  if [ "$MEM_SIZE" -le 3072 ]; then
-    check "MEMORY.md size: ${MEM_KB}KB (within 3KB budget)" "ok"
-  elif [ "$MEM_SIZE" -le 5120 ]; then
-    check "MEMORY.md size: ${MEM_KB}KB (over 3KB target — consider moving verbose content to project/memory files)" "warn"
+  if [ "$MEM_SIZE" -le 5120 ]; then
+    check "MEMORY.md size: ${MEM_KB}KB (within 5KB target)" "ok"
+  elif [ "$MEM_SIZE" -le 8192 ]; then
+    LESSONS_FILE="$WORKSPACE/memory/lessons.md"
+    if [ -f "$LESSONS_FILE" ] && [ "$(wc -l < "$LESSONS_FILE" 2>/dev/null)" -gt 5 ]; then
+      check "MEMORY.md size: ${MEM_KB}KB (lessons already in memory/lessons.md — size is ok)" "ok"
+    else
+      check "MEMORY.md size: ${MEM_KB}KB — consider moving lessons to memory/lessons.md" "warn"
+    fi
   else
-    check "MEMORY.md size: ${MEM_KB}KB (well over 3KB — loaded every session, move content to dedicated files)" "warn"
+    check "MEMORY.md size: ${MEM_KB}KB — too large, will slow every session boot" "fail"
   fi
 else
   check "MEMORY.md not found" "fail"
@@ -158,13 +253,19 @@ if command -v openclaw >/dev/null 2>&1; then
 
   # Check MEMORY.md size (should stay small for boot performance)
   if [ -f "$WORKSPACE/MEMORY.md" ]; then
-    MEM_SIZE=$(du -k "$WORKSPACE/MEMORY.md" 2>/dev/null | cut -f1)
-    if [ "$MEM_SIZE" -le 5 ]; then
-      check "MEMORY.md is ${MEM_SIZE}KB (target: < 5KB)" "ok"
-    elif [ "$MEM_SIZE" -le 10 ]; then
-      check "MEMORY.md is ${MEM_SIZE}KB — consider trimming (target: < 5KB)" "warn"
+    MEM_SIZE_KB=$(( $(wc -c < "$WORKSPACE/MEMORY.md" 2>/dev/null | tr -d ' ') / 1024 ))
+    if [ "$MEM_SIZE_KB" -le 5 ]; then
+      check "MEMORY.md is ${MEM_SIZE_KB}KB (target: < 5KB)" "ok"
+    elif [ "$MEM_SIZE_KB" -le 8 ]; then
+      # Check if lessons are already split out before warning
+      LESSONS_FILE="$WORKSPACE/memory/lessons.md"
+      if [ -f "$LESSONS_FILE" ] && [ "$(wc -l < "$LESSONS_FILE" 2>/dev/null)" -gt 5 ]; then
+        check "MEMORY.md is ${MEM_SIZE_KB}KB (lessons already in memory/lessons.md — size is ok)" "ok"
+      else
+        check "MEMORY.md is ${MEM_SIZE_KB}KB — consider moving lessons to memory/lessons.md" "warn"
+      fi
     else
-      check "MEMORY.md is ${MEM_SIZE}KB — too large, will slow boot (target: < 5KB)" "fail"
+      check "MEMORY.md is ${MEM_SIZE_KB}KB — too large, will slow every session boot" "fail"
     fi
   fi
 else

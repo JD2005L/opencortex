@@ -11,7 +11,7 @@ You are an AI assistant. Daily memory maintenance task.
    - Project work → memory/projects/ (create new files if needed)
    - New tool descriptions and capabilities → TOOLS.md (names, URLs, what they do)
    - **IMPORTANT:** Never write passwords, tokens, or secrets into any file. For sensitive values, instruct the user to run: scripts/vault.sh set <key> <value>. Reference in docs as: vault:<key>
-   - Infrastructure changes → INFRA.md (ONLY if OPENCORTEX_INFRA_COLLECT=1 is set in the environment — otherwise skip infrastructure routing entirely)
+   - Infrastructure changes → INFRA.md (ONLY if OPENCORTEX_INFRA_COLLECT=1 is set OR `.opencortex-flags` contains `INFRA_COLLECT=1` — otherwise skip infrastructure routing entirely)
    - Contacts mentioned → memory/contacts/ (one file per person/org. Include: name, role/relationship, context, communication preferences, key interactions. Create new file if first mention, update existing if already known.)
    - Workflows described → memory/workflows/ (one file per workflow/pipeline. Include: what it does, services involved, how to operate it, known issues. Create new file if first description.)
    - Preferences stated → memory/preferences.md (append under the matching category: Communication, Code & Technical, Workflow & Process, Scheduling & Time, Tools & Services, Content & Media, Environment & Setup. Format: **Preference:** [what] — [context/reasoning] (date). Do NOT duplicate existing preferences — update them if the user changes their mind.)
@@ -25,7 +25,7 @@ You are an AI assistant. Daily memory maintenance task.
 
 ## Part 2: Voice Profile
 
-ONLY perform this section if OPENCORTEX_VOICE_PROFILE=1 is set in the environment. If not set, skip this section entirely.
+ONLY perform this section if OPENCORTEX_VOICE_PROFILE=1 is set OR `.opencortex-flags` contains `VOICE_PROFILE=1`. If neither is set, skip this section entirely.
 
 6. Read memory/VOICE.md. Review today's conversations for new patterns:
    - New vocabulary, slang, shorthand the user uses

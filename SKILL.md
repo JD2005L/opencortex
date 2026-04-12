@@ -15,7 +15,7 @@ description: >
   agent with best practices. NOT for: runtime memory_search queries (use built-in memory
   tools). Triggers: "set up memory", "organize yourself", "stop forgetting", "memory
   architecture", "self-improving", "cortex", "bootstrap memory", "memory optimization".
-metadata: {"openclaw":{"requires":{"bins":["grep","sed","find"],"optionalBins":["git","gpg","openssl","openclaw","secret-tool","keyctl","file"]},"env":{"CLAWD_WORKSPACE":{"description":"Workspace directory (defaults to cwd)","required":false},"CLAWD_TZ":{"description":"Timezone for cron scheduling (defaults to UTC)","required":false},"OPENCORTEX_VAULT_PASS":{"description":"Vault passphrase via env var. Prefer system keyring.","required":false,"sensitive":true},"OPENCORTEX_VOICE_PROFILE":{"description":"Set to 1 to enable voice profiling in the nightly distillation cron. Off by default.","required":false,"sensitive":false},"OPENCORTEX_INFRA_COLLECT":{"description":"Set to 1 to enable infrastructure auto-collection in the nightly distillation cron. Off by default.","required":false,"sensitive":false},"OPENCORTEX_SCRUB_ALL":{"description":"Set to 1 to scrub all tracked files (not just known text types) during git backup. Off by default.","required":false,"sensitive":false},"OPENCORTEX_ALLOW_FILE_PASSPHRASE":{"description":"Set to 1 to allow vault passphrase stored in a file (.vault/.passphrase). Off by default; prefer system keyring.","required":false,"sensitive":false}},"sensitiveFiles":[".secrets-map",".vault/.passphrase"],"networkAccess":"Optional git push only (off by default, requires --push flag)"}}
+metadata: {"openclaw":{"requires":{"bins":["grep","sed","find"],"optionalBins":["git","gpg","openssl","openclaw","secret-tool","keyctl","file"]},"env":{"CLAWD_WORKSPACE":{"description":"Workspace directory (defaults to cwd)","required":false},"CLAWD_TZ":{"description":"Timezone for cron scheduling (defaults to UTC)","required":false},"OPENCORTEX_VAULT_PASS":{"description":"Vault passphrase via env var. Prefer system keyring.","required":false,"sensitive":true},"OPENCORTEX_VOICE_PROFILE":{"description":"Set to 1 to enable voice profiling in nightly distillation (env override; persistent default lives in .opencortex-flags).","required":false,"sensitive":false},"OPENCORTEX_INFRA_COLLECT":{"description":"Set to 1 to enable infrastructure auto-collection in nightly distillation (env override; persistent default lives in .opencortex-flags).","required":false,"sensitive":false},"OPENCORTEX_SCRUB_ALL":{"description":"Set to 1 to scrub all tracked files (not just known text types) during git backup. Off by default.","required":false,"sensitive":false},"OPENCORTEX_ALLOW_FILE_PASSPHRASE":{"description":"Set to 1 to allow vault passphrase stored in a file (.vault/.passphrase). Off by default; prefer system keyring.","required":false,"sensitive":false}},"sensitiveFiles":[".secrets-map",".vault/.passphrase"],"networkAccess":"Optional git push only (off by default, requires --push flag)"}}
 ---
 
 # OpenCortex — Self-Improving Memory Architecture
@@ -30,7 +30,7 @@ Transform a default OpenClaw agent into one that compounds knowledge daily.
 2. **Installs nightly maintenance** that distills daily work into permanent knowledge
 3. **Installs weekly synthesis** that catches patterns across days
 4. **Establishes principles** that enforce good memory habits — and backs them up with nightly audits that verify tool documentation, decision capture, sub-agent debriefs, failure analysis, and unnecessary deferrals to the user. Nothing slips through the cracks.
-6. **Builds a voice profile** of your human from daily conversations for authentic ghostwriting (opt-in, requires `OPENCORTEX_VOICE_PROFILE=1`)
+6. **Builds a voice profile** of your human from daily conversations for authentic ghostwriting (opt-in, requires `OPENCORTEX_VOICE_PROFILE=1` or `.opencortex-flags` with `VOICE_PROFILE=1`)
 7. **Encrypts sensitive data** in an AES-256 vault with key-only references in docs; supports passphrase rotation (`vault.sh rotate`) and validates key names on `vault.sh set`
 8. **Enables safe git backup** with secret scrubbing (secrets never modified in your live workspace — scrubbed in an isolated copy only)
 9. **Tracks growth over time** *(opt-in)* — daily metrics snapshots with compound scoring and ASCII growth charts
@@ -53,7 +53,7 @@ bash skills/opencortex/scripts/install.sh
 bash skills/opencortex/scripts/install.sh --dry-run
 ```
 
-The installer will ask about optional features (encrypted vault, voice profiling, infrastructure collection, git backup). It's safe to re-run — it skips anything that already exists. The installer itself makes no network calls — it only creates local files and registers cron jobs.
+The installer will ask about optional features (encrypted vault, voice profiling, infrastructure collection, git backup) and your preferred AI model for cron jobs (e.g. `sonnet`, `opus`, `haiku`). Saved to `.opencortex-model`. It's safe to re-run — it skips anything that already exists. The installer itself makes no network calls — it only creates local files and registers cron jobs.
 
 ```bash
 # 3. Verify everything is working (read-only — checks files and cron jobs, changes nothing)
