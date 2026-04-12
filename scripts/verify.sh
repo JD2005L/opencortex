@@ -95,24 +95,28 @@ if command -v openclaw &>/dev/null; then
 import sys, json
 try:
   data = json.load(sys.stdin)
-  if isinstance(data, list):
-    for c in data:
-      n = (c.get('name') or '').lower()
-      if 'distill' in n:
-        print((c.get('message') or '').strip())
-        break
+  jobs = data.get('jobs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+  for c in jobs:
+    n = (c.get('name') or '').lower()
+    if 'distill' in n:
+      payload = c.get('payload') or {}
+      msg = c.get('message') or payload.get('message') or ''
+      print(msg.strip())
+      break
 except: pass
 " 2>/dev/null || echo "")
       WEEKLY_MSG=$(echo "$CRON_JSON" | python3 -c "
 import sys, json
 try:
   data = json.load(sys.stdin)
-  if isinstance(data, list):
-    for c in data:
-      n = (c.get('name') or '').lower()
-      if 'synth' in n:
-        print((c.get('message') or '').strip())
-        break
+  jobs = data.get('jobs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+  for c in jobs:
+    n = (c.get('name') or '').lower()
+    if 'synth' in n:
+      payload = c.get('payload') or {}
+      msg = c.get('message') or payload.get('message') or ''
+      print(msg.strip())
+      break
 except: pass
 " 2>/dev/null || echo "")
       if [ -n "$DISTILL_MSG" ]; then

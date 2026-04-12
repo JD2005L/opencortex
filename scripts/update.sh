@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-OPENCORTEX_VERSION="3.6.6"
+OPENCORTEX_VERSION="3.6.7"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Flags
